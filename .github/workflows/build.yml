@@ -1,0 +1,67 @@
+name: Build akane-injector
+
+on:
+  workflow_dispatch:      # ★手动触发★
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive      # ★子模块必须拉★
+
+      - name: Show environment
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "NDK dirs:"; ls -d $ANDROID_SDK_ROOT/ndk/* 2>/dev/null || true
+          echo "Docker:"; docker --version
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang llvm lld make git pkg-config \
+            libelf-dev zlib1g-dev python3 curl ca-certificates
+          # ★bpftool 静态二进制（akane 不一定用，保险起见装上）★
+          if [ ! -x bpftool_bin ]; then
+            curl -L -o bpftool_bin \
+              https://github.com/libbpf/bpftool/releases/download/v7.4.0/bpftool-v7.4.0-amd64.tar.gz \
+              && tar -xzf bpftool_bin && mv bpftool bpftool_bin && chmod +x bpftool_bin || true
+          fi
+          ls -la bpftool_bin 2>/dev/null || echo "no bpftool (ok)"
+
+      - name: Pull ddk toolchain image
+        run: docker pull ghcr.io/ylarod/ddk-min:latest
+
+      - name: Set ANDROID_NDK_HOME
+        run: |
+          NDK=$(ls -d $ANDROID_SDK_ROOT/ndk/* 2>/dev/null | sort -V | tail -1)
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "using NDK=$NDK"
+
+      - name: Build
+        run: make
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          find out -type f \( -name 'akane-injector' -o -name 'libakane-runtime.so' -o -name '*.ko' \) \
+            -exec cp --parents {} artifacts/ \; 2>/dev/null || true
+          find out -name 'akane-injector' -exec cp {} artifacts/ \; 2>/dev/null || true
+          find out -name 'libakane-runtime.so' -exec cp {} artifacts/ \; 2>/dev/null || true
+          echo "=== artifacts ==="
+          find artifacts -type f -exec ls -la {} \;
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: akane-injector-out
+          path: artifacts/
+          if-no-files-found: warn
