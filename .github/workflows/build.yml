@@ -37,8 +37,11 @@ jobs:
           fi
           ls -la bpftool_bin 2>/dev/null || echo "no bpftool (ok)"
 
-      - name: Pull ddk toolchain image
-        run: docker pull ghcr.io/ylarod/ddk-min:latest
+      - name: Login to ghcr
+        continue-on-error: true
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin || true
+
 
       - name: Set ANDROID_NDK_HOME
         run: |
